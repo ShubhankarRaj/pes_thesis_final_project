@@ -25,6 +25,7 @@ class BaseDataset(Dataset):
         # else:
         data = pickle.load(open(dataset_path, 'rb'), encoding='utf-8')
         data = data[dataset_type]
+        self.conversation = []
         self.utt = data[0]
         self.label = data[1]
         self.spk = data[2]
@@ -34,12 +35,14 @@ class BaseDataset(Dataset):
         self.utt_id = []
         self.wmask = []
         for conv in self.utt:
+            # print(conv)
             input_ids = []
             attention_mask = []
             for u in conv:
                 encoded_inputs = tokenizer(u, truncation=True, max_length=52)
                 input_ids.append(torch.tensor(encoded_inputs['input_ids'], dtype=torch.long))
                 attention_mask.append(torch.tensor(encoded_inputs['attention_mask'], dtype=torch.float))
+            self.conversation.append(conv)
             self.utt_id.append(input_ids)
             self.wmask.append(attention_mask)
         self.cmsk = pickle.load(open(edge_attr_path, 'rb'), encoding='utf-8')
@@ -84,8 +87,9 @@ class BaseDataset(Dataset):
         selected_edge_attr = torch.stack(selected_edge_attr, dim=0)
         selected_edge_relation_binary = torch.tensor(selected_edge_relation_binary, dtype=torch.long)
         selected_edge_relation = torch.tensor(selected_edge_relation, dtype=torch.long)
-
-        return selected_utt, selected_mask, selected_label, selected_uttm, selected_spk, selected_edge_index, selected_edge_attr, selected_edge_relation_binary, selected_edge_relation
+        # Setting the conversation item as it is
+        selected_conversation = self.conversation[item]
+        return selected_utt, selected_mask, selected_label, selected_uttm, selected_spk, selected_edge_index, selected_edge_attr, selected_edge_relation_binary, selected_edge_relation, selected_conversation
 
     def __len__(self):
         return self.length
@@ -93,12 +97,12 @@ class BaseDataset(Dataset):
 
 def collate_fn(data):
     data = data[0]
-    utt, mask, label, uttm, spk, edge_index, edge_attr, edge_rel_b, edge_rel = data
-    return utt, mask, label, uttm, spk, edge_index, edge_attr, edge_rel_b, edge_rel
+    utt, mask, label, uttm, spk, edge_index, edge_attr, edge_rel_b, edge_rel, conv = data
+    return utt, mask, label, uttm, spk, edge_index, edge_attr, edge_rel_b, edge_rel, conv
 
 
 def collate_fn_batch(data):
-    utt, mask, label, uttm, spk, edge_index, edge_attr, edge_rel_b, edge_rel = [], [], [], [], [], [], [], [], []
+    utt, mask, label, uttm, spk, edge_index, edge_attr, edge_rel_b, edge_rel, conv = [], [], [], [], [], [], [], [], [], []
     for d in data:
         utt.append(d[0])
         mask.append(d[1])
@@ -109,4 +113,5 @@ def collate_fn_batch(data):
         edge_attr.append(d[6])
         edge_rel_b.append(d[7])
         edge_rel.append(d[8])
-    return utt, mask, label, uttm, spk, edge_index, edge_attr, edge_rel_b, edge_rel
+        conv.append(d[9])
+    return utt, mask, label, uttm, spk, edge_index, edge_attr, edge_rel_b, edge_rel, conv

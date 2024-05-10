@@ -7,7 +7,10 @@ from mask import build_mixed_mask_local
 from torch.nn.init import xavier_uniform_
 from triple import FusionAttention
 from torch.nn.utils.rnn import pad_sequence
-
+# from fastai.vision.models import resnet34
+# from fastai.vision.all import *
+from fastai.vision.all import PILImage
+from fastai.vision.all import tensor
 
 from transformer import _get_clones
 from bert_utils import AbsolutePositionEncoding
@@ -330,11 +333,118 @@ class BatchTransformer(nn.Module):
         return output
 
 
+class EmotionDetectionUsingSpectrogram(nn.Module):
+    def __init__(self):
+        super(EmotionDetectionUsingSpectrogram, self).__init__()
+        
+        MODEL_ARCH_PATH = "/content/gdrive/MyDrive/emotion_detection_using_sound/saved_models/emotion_detection_using_only_sound/fastai_model_1st_iter_arch.pth"
+        base_model = torch.load(MODEL_ARCH_PATH) #load model architecutre
+        pretrained_model_state_dict_path = "/content/gdrive/MyDrive/emotion_detection_using_sound/saved_models/emotion_detection_using_only_sound/emotion_detection_state_dict_using_spectrogram_2nd_iter.pth"
+        base_model.load_state_dict(torch.load(pretrained_model_state_dict_path))
+
+        # # Freeze all layers
+        # for param in base_model.parameters():
+        #     param.requires_grad = False
+        
+        # Unfreeze the last few layers
+        for param in base_model[-2:].parameters():
+            param.requires_grad = True
+
+        # Concatenate the base model with the new layer
+        self.base_model = base_model
+        # Replace the last layer with the new layer
+        self.model = nn.Sequential(self.base_model)
+
+
+    def forward(self, x):
+        # Convert JPEG file path to tensor
+        batch_logits = torch.tensor([])
+        normalized_images = torch.tensor([])
+        for each_image_path in x:
+            if each_image_path == "" or each_image_path is None:
+                # Concatenating an empty tensor with normalized_images tensor
+                normalized_images = torch.cat((normalized_images,torch.empty(0)), dim=0)         
+            else:
+                image = PILImage.create(each_image_path)
+                tensor_image = tensor(image)
+                # Normalize image tensor
+                normalized_image = tensor_image / 255.0
+                # Add batch dimension
+                normalized_image = normalized_image.unsqueeze(0)
+                # Transpose to [batch_size, channels, height, width] as we were getting channel mismatch error
+                normalized_image = normalized_image.permute(0, 3, 1, 2)
+                # print(f"IMAGE SHAPE NORMALIZED: {normalized_image.shape}")
+                normalized_images = torch.cat((normalized_images,normalized_image), dim=0)
+            
+        # Move input tensor to GPU if available
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+            normalized_images = normalized_images.to(device)
+            self.to(device)
+        # Pass the normalized image through the base model
+        logits = self.model(normalized_images)
+        # batch_logits = torch.cat(logits, dim=0)
+        return logits
+
+      
+class MentalModelWithSpectrogram(nn.Module):
+    def __init__(self, encoder_type='bert-base-uncased', encoder_mode='maxpooling', sent_dim=300, tr_nhead=6, tr_ff_dim=300, tr_dropout=0.1, attn_mask=True, tr_num_layer=6, max_len=120, num_class=6, bidirectional=True, num_block=3, cn_nhead=6, cn_ff_dim=300, cn_dropout=0.1, edge_dim=300, bias=False, cn_num_layer=3, edge_mapping=True, beta=True, root_weight=True, choice='both'):
+        super(MentalModelWithSpectrogram, self).__init__()
+        self.choice = choice
+        self.uttrenc = UtteranceEncoder(encoder_type, encoder_mode, sent_dim)
+        if choice == 'both':
+            trm_layer = TransformerLayerAbs(sent_dim, tr_nhead, tr_ff_dim, tr_dropout, 'relu', attn_mask)
+            self.convenc = TripleTransformer(trm_layer, tr_nhead, tr_num_layer,
+                                             sent_dim, max_len, bidirectional, num_block)
+            self.tcn = TRMCN(sent_dim, cn_ff_dim, sent_dim//cn_nhead, cn_nhead, cn_dropout, edge_dim,
+                             bias, cn_num_layer, edge_mapping, beta, root_weight)
+            self.spectrogram_classification = EmotionDetectionUsingSpectrogram()
+            self.classifier = nn.Linear(2 * sent_dim, num_class)
+        elif choice == 'tr':
+            trm_layer = TransformerLayerAbs(sent_dim, tr_nhead, tr_ff_dim, tr_dropout, 'relu', attn_mask)
+            self.convenc = TripleTransformer(trm_layer, tr_nhead, tr_num_layer,
+                                             sent_dim, max_len, bidirectional, num_block)
+            self.classifier = nn.Linear(sent_dim, num_class)
+        elif choice == 'cn':
+            self.tcn = TRMCN(sent_dim, cn_ff_dim, sent_dim // cn_nhead, cn_nhead, cn_dropout, edge_dim,
+                             bias, cn_num_layer, edge_mapping, beta, root_weight)
+            self.classifier = nn.Linear(sent_dim, num_class)
+        else:
+            raise NotImplementedError()
+
+    def forward(self, conversation, mask, utt_mask=None, spk_mask=None,
+                window=None, mode=None, edge_index=None, edge_attr=None, spectrogram_image_path=None, residual=False):
+        sent_emb = self.uttrenc(conversation, mask)
+        if self.choice == 'both':
+            contextualized_emb = self.convenc(sent_emb, utt_mask, spk_mask, window, mode)
+            mental_emb = self.tcn(sent_emb, edge_index, edge_attr)
+            concat_emb = torch.cat([contextualized_emb, mental_emb], dim=1)
+            logits_conversation = self.classifier(concat_emb)
+            # print(f"SPECTROGRAM IMAGE PATH: {spectrogram_image_path}")
+            logits_spectrogram = self.spectrogram_classification(spectrogram_image_path)
+            # print(f"LOGITS OF CONVERSATION SHAPE: {logits_conversation}")
+            # print(f"LOGITS OF CONVERSATION SHAPE: {logits_conversation.shape}")
+            # print(f"LOGITS OF SPECTROGRAM SHAPE: {logits_spectrogram}")
+            # print(f"LOGITS OF SPECTROGRAM SHAPE: {logits_spectrogram.shape}")
+            
+            # Adding the logits together in order to bring the results of the spectrogram into account as well
+            logits = logits_conversation + logits_spectrogram
+            # logits = self.classifier(concat_emb)
+            
+        elif self.choice == 'tr':
+            contextualized_emb = self.convenc(sent_emb, utt_mask, spk_mask, window, mode)
+            logits = self.classifier(contextualized_emb)
+        else:
+            mental_emb = self.tcn(sent_emb, edge_index, edge_attr)
+            if residual:
+                mental_emb = mental_emb + sent_emb
+            logits = self.classifier(mental_emb)
+        
+        return logits
+
+      
 class MentalModel(nn.Module):
-    def __init__(self, encoder_type='bert-base-uncased', encoder_mode='maxpooling', sent_dim=300, tr_nhead=6,
-                 tr_ff_dim=300, tr_dropout=0.1, attn_mask=True, tr_num_layer=6, max_len=120, num_class=6,
-                 bidirectional=True, num_block=3, cn_nhead=6, cn_ff_dim=300, cn_dropout=0.1, edge_dim=300,
-                 bias=False, cn_num_layer=3, edge_mapping=True, beta=True, root_weight=True, choice='both'):
+    def __init__(self, encoder_type='bert-base-uncased', encoder_mode='maxpooling', sent_dim=300, tr_nhead=6, tr_ff_dim=300, tr_dropout=0.1, attn_mask=True, tr_num_layer=6, max_len=120, num_class=6, bidirectional=True, num_block=3, cn_nhead=6, cn_ff_dim=300, cn_dropout=0.1, edge_dim=300, bias=False, cn_num_layer=3, edge_mapping=True, beta=True, root_weight=True, choice='both'):
         super(MentalModel, self).__init__()
         self.choice = choice
         self.uttrenc = UtteranceEncoder(encoder_type, encoder_mode, sent_dim)
@@ -344,6 +454,7 @@ class MentalModel(nn.Module):
                                              sent_dim, max_len, bidirectional, num_block)
             self.tcn = TRMCN(sent_dim, cn_ff_dim, sent_dim//cn_nhead, cn_nhead, cn_dropout, edge_dim,
                              bias, cn_num_layer, edge_mapping, beta, root_weight)
+            
             self.classifier = nn.Linear(2 * sent_dim, num_class)
         elif choice == 'tr':
             trm_layer = TransformerLayerAbs(sent_dim, tr_nhead, tr_ff_dim, tr_dropout, 'relu', attn_mask)
@@ -373,6 +484,7 @@ class MentalModel(nn.Module):
             if residual:
                 mental_emb = mental_emb + sent_emb
             logits = self.classifier(mental_emb)
+        # print(f"LOGITS WITHOUT SPECTROGRAM SHAPE: {logits.shape}")
         return logits
 
 
