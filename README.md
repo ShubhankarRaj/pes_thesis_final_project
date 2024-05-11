@@ -28,3 +28,5 @@ For COSMIC style training, the command is:
 ## TRMSM
 The model is inserted into `MentalModel`, which can be activated by `-choice 'tr'` in *gnn_train.py*. Additionally, the hyper-params for it is started with 'tr_'.  
 The commands for training TRMSM: `Pending`. 
+
+NEED TO ADD CHANGES RELATED PATH OF PRETRAINED MODELS.
