@@ -87,6 +87,14 @@ class UtteranceEncoder(nn.Module):
 
 
 class FFMLP(nn.Module):
+    """
+    FeedForward Multi-Layer Perceptron (FFMLP) model class
+    this code defines a simple FFMLP model with two linear layers, layer normalization, 
+    and dropout regularization. It's a feedforward neural network where the input is 
+    passed through one hidden layer with ReLU activation before being combined with the 
+    original input and passed through another linear layer. Layer normalization and 
+    dropout are applied to improve generalization and prevent overfitting.
+    """
     def __init__(self, input_dim, ff_dim, dropout):
         super(FFMLP, self).__init__()
         self.input_dim = input_dim
@@ -107,6 +115,15 @@ class FFMLP(nn.Module):
 
 
 class TRMCN(nn.Module):
+    """
+    Transformer-MLP Convolutional Network
+    It uses the TransformerConv layer from PyTorch Geometric for graph convolution and 
+    combines it with a feedforward MLP (FFMLP) for additional processing. 
+    This code defines a neural network model that combines graph convolution using the 
+    TransformerConv layer with feedforward MLP layers. It can be used for tasks such as 
+    node classification or graph classification, where input graphs are represented as 
+    node features, edge attributes, and connectivity information.
+    """
     def __init__(self, in_channels, ff_dim, out_channels, heads, dropout, edge_dim, bias, num_layers, edge_mapping, beta, root_weight):
         super(TRMCN, self).__init__()
         assert in_channels == heads * out_channels, 'in_channels must equal heads * out_channels'
@@ -388,7 +405,19 @@ class EmotionDetectionUsingSpectrogram(nn.Module):
 
       
 class MentalModelWithSpectrogram(nn.Module):
-    def __init__(self, encoder_type='bert-base-uncased', encoder_mode='maxpooling', sent_dim=300, tr_nhead=6, tr_ff_dim=300, tr_dropout=0.1, attn_mask=True, tr_num_layer=6, max_len=120, num_class=6, bidirectional=True, num_block=3, cn_nhead=6, cn_ff_dim=300, cn_dropout=0.1, edge_dim=300, bias=False, cn_num_layer=3, edge_mapping=True, beta=True, root_weight=True, choice='both'):
+    def __init__(self, 
+                 encoder_type='bert-base-uncased', 
+                 encoder_mode='maxpooling', 
+                 sent_dim=300, tr_nhead=6, 
+                 tr_ff_dim=300, tr_dropout=0.1, 
+                 attn_mask=True, tr_num_layer=6, 
+                 max_len=120, num_class=6, 
+                 bidirectional=True, num_block=3, 
+                 cn_nhead=6, cn_ff_dim=300, 
+                 cn_dropout=0.1, edge_dim=300, 
+                 bias=False, cn_num_layer=3, 
+                 edge_mapping=True, beta=True, 
+                 root_weight=True, choice='both'):
         super(MentalModelWithSpectrogram, self).__init__()
         self.choice = choice
         self.uttrenc = UtteranceEncoder(encoder_type, encoder_mode, sent_dim)

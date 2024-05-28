@@ -159,6 +159,17 @@ class TransformerLayerAbs3D(nn.Module):
 
 
 class TransformerLayerAbs(nn.Module):
+    """
+    This PyTorch class TransformerLayerAbs represents a single layer of a Transformer 
+    model, specifically designed for sequence-to-sequence tasks such as machine 
+    translation or text generation.
+    this class implements a single layer of a Transformer model, consisting of a 
+    multi-head attention mechanism followed by a feedforward neural network layer. 
+    It applies residual connections, layer normalization, and dropout for regularization. 
+    The class provides flexibility to include attention masks and return attention 
+    weights if needed. This layer can be stacked to create a complete Transformer model 
+    for sequence-to-sequence tasks.
+    """
     def __init__(self, d_model, nhead, dim_feedforward, dropout, activation, attn_mask=False):
         super(TransformerLayerAbs, self).__init__()
         self.attention = MultiHeadAttention(d_model, nhead, dropout, attn_mask)
